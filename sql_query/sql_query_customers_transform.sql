@@ -63,7 +63,7 @@ SELECT
 WHERE Year_Subscription = 2020;
 
 FROM intermediate_customers_transform
-INSERT OVERWRITE TABLE customers
+INSERT OVERWRITE TABLE customers_transform
 PARTITION(Year_Subscription = 2021)
 SELECT 
  Index,
@@ -82,7 +82,7 @@ SELECT
 WHERE Year_Subscription = 2021;
 
 FROM intermediate_customers_transform
-INSERT OVERWRITE TABLE customers
+INSERT OVERWRITE TABLE customers_transform
 PARTITION(Year_Subscription = 2022)
 SELECT 
 Index,
