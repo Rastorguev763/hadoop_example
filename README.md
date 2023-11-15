@@ -206,8 +206,343 @@ hadoop fs -put example_folder/csv_files_transformed  /user/admin/
 
 В качестве результата необходимо предоставить:
 
-скрипты на python+pandas для предобработки исходных файлов
+- скрипты на python+pandas для предобработки исходных файлов
 
-код загрузки файлов на hdfs
+- код загрузки файлов на hdfs
 
-код всех запросов для создания таблиц и план запроса для формирования витрины.
+- код всех запросов для создания таблиц и план запроса для формирования витрины.
+
+## Python
+
+```python
+import os
+import pandas as pd
+
+def find_csv_files(folder_path):
+    csv_files = []
+    
+    # Проверяем, существует ли указанная папка
+    if not os.path.exists(folder_path):
+        print(f"Папка {folder_path} не существует.")
+        return csv_files
+
+    # Обходим все файлы и подпапки в указанной папке
+    for root, dirs, files in os.walk(folder_path):
+        for file in files:
+            # Проверяем, является ли текущий файл CSV файлом
+            if file.endswith(".csv"):
+                # Формируем полный путь к файлу и добавляем его в список
+                csv_files.append(os.path.join(root, file))
+    
+    return csv_files
+
+def read_csv_file(file_path):
+    try:
+        # Используем функцию read_csv для чтения CSV файла
+        dataframe = pd.read_csv(file_path)
+        return dataframe
+    except Exception as e:
+        print(f"Произошла ошибка при чтении файла {file_path}: {e}")
+        return None
+    
+def split_and_add_group(dataframe, num_parts=10):
+    try:
+        # Рассчитываем количество строк в каждой части
+        rows_per_part = len(dataframe) // num_parts
+
+        # Добавление номера части в столбец "groupe" к каждой части
+        for i in range(num_parts):
+            start_idx = i * rows_per_part
+            end_idx = (i + 1) * rows_per_part if i < num_parts - 1 else None
+            dataframe.loc[start_idx:end_idx, 'Groupe'] = f'{i + 1}'
+
+        return dataframe
+    except Exception as e:
+        print(f"Произошла ошибка: {e}")
+        return None
+
+def save_to_csv(dataframe, output_file):
+    try:
+        # Получаем директорию из полного пути к файлу
+        output_directory = os.path.dirname(output_file)
+
+        # Проверяем существование директории
+        if not os.path.exists(output_directory):
+            # Если директории не существует, создаем её
+            os.makedirs(output_directory)
+
+        # Сохранение DataFrame в новый CSV файл
+        dataframe.to_csv(output_file, index=False)
+        print(f"DataFrame успешно сохранен в {output_file}")
+    except Exception as e:
+        print(f"Произошла ошибка при сохранении файла: {e}")
+
+# Функция для извлечения года из даты
+def extract_year(date_string):
+    return pd.to_datetime(date_string).year
+
+
+
+folder_path = 'csv_files' # "/путь/к/папке/.csv"
+output_folder_path = 'csv_files_transformed'
+csv_files_list = find_csv_files(folder_path)
+
+for csv_file in csv_files_list:
+    filename = os.path.basename(csv_file).split('.')[0]+'_transform'+'.csv'
+    path = output_folder_path + '/' + filename
+    frame_csv = read_csv_file(csv_file)
+    frame_csv = split_and_add_group(frame_csv, num_parts=10)
+    if os.path.basename(csv_file) == 'customers.csv':
+        # Добавление нового столбца "номер года"
+        frame_csv['Year Subscription'] = frame_csv['Subscription Date'].apply(extract_year)
+   
+    save_to_csv(frame_csv, path)
+```
+
+## SQL Query
+
+```sql
+-- Создаем таблицу
+CREATE TABLE people_transform (
+  Index INT,
+  User_Id STRING,
+  First_Name STRING,
+  Last_Name STRING,
+  Sex STRING,
+  Email STRING,
+  Phone STRING,
+  Date_of_birth DATE,
+  Job_Title STRING,
+  Groupe INT
+)
+CLUSTERED BY (Groupe) INTO 10 BUCKETS
+ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.OpenCSVSerde'
+TBLPROPERTIES ('skip.header.line.count'='1');
+
+-- Создаем промежуточную таблицу
+CREATE TABLE intermediate_people_transform (
+  Index INT,
+  User_Id STRING,
+  First_Name STRING,
+  Last_Name STRING,
+  Sex STRING,
+  Email STRING,
+  Phone STRING,
+  Date_of_birth DATE,
+  Job_Title STRING,
+  Groupe INT
+)
+ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.OpenCSVSerde'
+TBLPROPERTIES ('skip.header.line.count'='1');
+
+-- Загружаем данные в промежуточную таблицу
+LOAD DATA INPATH '/user/admin/csv_files_transformed/people_transform.csv' INTO TABLE intermediate_people_transform;
+
+-- Загружаем данные из промежуточной таблицы в бакетированную таблицу
+INSERT INTO TABLE people_transform
+SELECT * FROM intermediate_people_transform;
+
+-- Удаляем промежуточную таблицу
+DROP TABLE intermediate_people_transform;
+```
+
+```sql
+-- Создаем таблицу
+CREATE TABLE organizations_transform (
+  Index INT,
+  Organization_Id STRING,
+  Name STRING,
+  Website STRING,
+  Country STRING,
+  Description STRING,
+  Founded INT,
+  Industry STRING,
+  Number_of_employees INT,
+  Groupe INT
+)
+CLUSTERED BY (Groupe) INTO 10 BUCKETS
+ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.OpenCSVSerde'
+TBLPROPERTIES ('skip.header.line.count'='1');
+
+-- Создаем промежуточную таблицу
+CREATE TABLE intermediate_organizations_transform (
+  Index INT,
+  Organization_Id STRING,
+  Name STRING,
+  Website STRING,
+  Country STRING,
+  Description STRING,
+  Founded INT,
+  Industry STRING,
+  Number_of_employees INT,
+  Groupe INT
+)
+ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.OpenCSVSerde'
+TBLPROPERTIES ('skip.header.line.count'='1');
+
+
+-- Загружаем данные в промежуточную таблицу
+LOAD DATA INPATH '/user/admin/csv_files_transformed/organizations_transform.csv' INTO TABLE intermediate_organizations_transform;
+
+-- Загружаем данные из промежуточной таблицы в бакетированную таблицу
+INSERT INTO TABLE organizations_transform
+SELECT * FROM intermediate_organizations_transform;
+
+-- Удаляем промежуточную таблицу
+DROP TABLE intermediate_organizations_transform;
+```
+
+```sql
+-- Создаем таблицу
+CREATE TABLE customers_transform(
+    Index INT,
+    Customer_Id STRING,
+    First_Name STRING,
+    Last_Name STRING,
+    Company STRING,
+    City STRING,
+    Country STRING,
+    Phone_1 STRING,
+    Phone_2 STRING,
+    Email STRING,
+    Subscription_Date DATE,
+    Website STRING,
+    Groupe INT
+)
+PARTITIONED BY(Year_Subscription INT)
+CLUSTERED BY(Groupe) INTO 10 BUCKETS
+ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.OpenCSVSerde'
+TBLPROPERTIES ("skip.header.line.count"="1");
+
+-- Создаем промежуточную таблицу
+CREATE TABLE intermediate_customers_transform(
+    Index INT,
+    Customer_Id STRING,
+    First_Name STRING,
+    Last_Name STRING,
+    Company STRING,
+    City STRING,
+    Country STRING,
+    Phone_1 STRING,
+    Phone_2 STRING,
+    Email STRING,
+    Subscription_Date DATE,
+    Website STRING,
+    Groupe INT,
+    Year_Subscription INT
+)
+ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.OpenCSVSerde'
+TBLPROPERTIES ("skip.header.line.count"="1");
+
+-- Загружаем данные в промежуточную таблицу
+LOAD DATA INPATH '/user/admin/csv_files_transformed/customers_transform.csv' INTO TABLE intermediate_customers_transform;
+
+-- Загружаем данные из промежуточной таблицы в бакетированную таблицу
+FROM intermediate_customers_transform
+INSERT OVERWRITE TABLE customers_transform
+PARTITION(Year_Subscription = 2020)
+SELECT
+    Index,
+    Customer_Id,
+    First_Name,
+    Last_Name,
+    Company,
+    City,
+    Country,
+    Phone_1,
+    Phone_2,
+    Email,
+    Subscription_Date,
+    Website,
+    Groupe
+WHERE Year_Subscription = 2020;
+
+FROM intermediate_customers_transform
+INSERT OVERWRITE TABLE customers
+PARTITION(Year_Subscription = 2021)
+SELECT 
+ Index,
+    Customer_Id,
+    First_Name,
+    Last_Name,
+    Company,
+    City,
+    Country,
+    Phone_1,
+    Phone_2,
+    Email,
+    Subscription_Date,
+    Website,
+    Groupe
+WHERE Year_Subscription = 2021;
+
+FROM intermediate_customers_transform
+INSERT OVERWRITE TABLE customers
+PARTITION(Year_Subscription = 2022)
+SELECT 
+Index,
+    Customer_Id,
+    First_Name,
+    Last_Name,
+    Company,
+    City,
+    Country,
+    Phone_1,
+    Phone_2,
+    Email,
+    Subscription_Date,
+    Website,
+    Groupe
+WHERE Year_Subscription = 2022;
+
+-- Удаляем промежуточную таблицу
+DROP TABLE intermediate_customers_transform;
+```
+
+```sql
+WITH ages AS
+  ( SELECT org.Name AS company,
+           cust.Year_Subscription AS YEAR,
+           FLOOR(DATEDIFF((cust.Subscription_Date), DATE(ppl.Date_of_birth)) / 365) AS age,
+           COUNT(*) AS subscribers_count,
+           ROW_NUMBER() OVER (PARTITION BY org.Name, cust.Year_Subscription
+                              ORDER BY COUNT(*) DESC) AS rn
+   FROM organizations_transform AS org
+   LEFT JOIN customers_transform AS cust ON org.Website = cust.Website
+   JOIN people_transform AS ppl ON ppl.email = cust.email
+   GROUP BY org.Name,
+            cust.Year_Subscription,
+            FLOOR(DATEDIFF((cust.Subscription_Date), DATE(ppl.Date_of_birth)) / 365))
+SELECT company,
+       YEAR,
+       CASE
+           WHEN age <= 18 THEN '[0 - 18]'
+           WHEN age <= 25 THEN '[19 - 25]'
+           WHEN age <= 35 THEN '[26 - 35]'
+           WHEN age <= 45 THEN '[36 - 45]'
+           WHEN age <= 55 THEN '[46 - 55]'
+           ELSE '[55+]'
+       END AS age_group
+FROM ages
+WHERE rn = 1
+ORDER BY company,
+         YEAR;
+```
+
+## План запроса
+
+1. **Создание временной таблицы с данными:**
+   - Используется конструкция `WITH` для создания временной таблицы `ages`, содержащей информацию о компаниях, годах подписки, возрасте подписчиков и их количестве.
+   - Производится соединение таблиц `organizations_transform`, `customers_transform` и `people_transform` по заданным условиям.
+   - Рассчитывается возраст подписчика на момент подписки с использованием функций `DATEDIFF` и `FLOOR`.
+   - Данные агрегируются с использованием `GROUP BY` для каждой уникальной комбинации (компания, год подписки, возраст).
+   - Оставляются только записи, где год подписки совпадает с годом в столбце `Subscription_Date`.
+   - Присваиваются порядковые номера с использованием `ROW_NUMBER()` для каждой группы.
+
+2. **Выбор первой возрастной группы для каждой уникальной комбинации:**
+   - В основной части запроса выбираются название компании, год подписки, и определяется возрастная группа с использованием `CASE WHEN` в зависимости от значения возраста.
+   - Результаты фильтруются, оставляя только те строки, где порядковый номер (`rn`) равен 1.
+   - Результаты сортируются по названию компании и году подписки.
+
+3. **Получение финальных результатов:**
+   - Выполняется запрос для получения сводной статистики по возрастным группам подписчиков для каждой компании и года.
